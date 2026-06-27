@@ -1,6 +1,16 @@
 
 # 🔬 Multi-Document Research Assistant 
 personal Researcher Assistant chatbot
+![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)
+![Streamlit](https://img.shields.io/badge/Streamlit-Cloud-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)
+![LangChain](https://img.shields.io/badge/LangChain-RAG-brightgreen?style=flat-square)
+![LangGraph](https://img.shields.io/badge/LangGraph-Pipeline-4CAF50?style=flat-square)
+![ChromaDB](https://img.shields.io/badge/VectorStore-ChromaDB-purple?style=flat-square)
+![FastEmbed](https://img.shields.io/badge/Embeddings-FastEmbed_ONNX-orange?style=flat-square)
+![HuggingFace](https://img.shields.io/badge/HuggingFace-bge--small--en--v1.5-yellow?style=flat-square)
+![Groq](https://img.shields.io/badge/LLM-Groq_API-F55036?style=flat-square)
+![Ollama](https://img.shields.io/badge/Local_LLM-Ollama-black?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)
 
 A Streamlit-powered RAG (Retrieval-Augmented Generation) application that lets you upload multiple research articles or paste URLs and ask questions across all of them at once. Built with LangChain, LangGraph, ChromaDB, and a 7-model Groq fallback queue.
 
