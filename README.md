@@ -10,7 +10,6 @@ personal Researcher Assistant chatbot
 ![FastEmbed](https://img.shields.io/badge/Embeddings-FastEmbed_ONNX-orange?style=flat-square)
 ![HuggingFace](https://img.shields.io/badge/HuggingFace-bge--small--en--v1.5-yellow?style=flat-square)
 ![Groq](https://img.shields.io/badge/LLM-Groq_API-F55036?style=flat-square)
-![Ollama](https://img.shields.io/badge/Local_LLM-Ollama-black?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)
 
 A Streamlit-powered RAG (Retrieval-Augmented Generation) application that lets you upload multiple research articles or paste URLs and ask questions across all of them at once. Built with LangChain, LangGraph, ChromaDB, and a 7-model Groq fallback queue.
