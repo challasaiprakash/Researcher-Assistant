@@ -1,6 +1,7 @@
 
 # 🔬 Multi-Document Research Assistant 
 personal Researcher Assistant chatbot
+
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)
 ![Streamlit](https://img.shields.io/badge/Streamlit-Cloud-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)
 ![LangChain](https://img.shields.io/badge/LangChain-RAG-brightgreen?style=flat-square)
