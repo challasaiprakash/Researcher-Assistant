@@ -1,0 +1,11 @@
+# Never commit real secrets
+
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local vector DB (if you switch back to persistent Chroma)
+chroma_research_db/

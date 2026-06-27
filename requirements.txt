@@ -1,0 +1,27 @@
+# Core app
+streamlit>=1.36
+
+# LangChain + LangGraph (RAG pipeline)
+langchain>=0.3
+langchain-community>=0.3
+langchain-core>=0.3
+langchain-text-splitters>=0.3
+langgraph>=0.2
+
+# LLM providers
+langchain-groq>=0.2          # free Groq-hosted Llama / Mixtral
+langchain-ollama>=0.2        # local llama3 fallback (optional at runtime)
+
+# Embeddings + vector store
+# fastembed = ONNX-based embeddings (no torch / transformers) — avoids the
+# torch/sentence-transformers version conflicts that break on some machines.
+fastembed>=0.3
+langchain-chroma>=0.1
+chromadb>=0.5
+
+# Document loaders
+pypdf>=4.0                   # PDF
+docx2txt>=0.8               # Word .doc/.docx
+
+# Conversation export
+reportlab>=4.0              # PDF download of the Q&A

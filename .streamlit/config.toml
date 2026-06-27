@@ -1,0 +1,8 @@
+# Light-brown theme. base="light" forces dark (black) text on all built-in
+# Streamlit widgets instead of the dark-theme white text.
+[theme]
+base = "light"
+primaryColor = "#8b6f4e"
+backgroundColor = "#F3E9DC"
+secondaryBackgroundColor = "#E8D8C3"
+textColor = "#1a1a1a"
