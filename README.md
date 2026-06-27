@@ -1,8 +1,8 @@
-# Researcher-Assistant
-personal Researcher Assistant chatbot
-# 🔬 Multi-Document Research Assistant v3
 
-A Streamlit-powered RAG (Retrieval-Augmented Generation) application that lets you upload multiple research articles — or paste URLs — and ask questions across all of them at once. Built with LangChain, LangGraph, ChromaDB, and a 7-model Groq fallback queue.
+# 🔬 Multi-Document Research Assistant 
+personal Researcher Assistant chatbot
+
+A Streamlit-powered RAG (Retrieval-Augmented Generation) application that lets you upload multiple research articles or paste URLs and ask questions across all of them at once. Built with LangChain, LangGraph, ChromaDB, and a 7-model Groq fallback queue.
 
 ---
 
