@@ -1,16 +1,6 @@
 """
 🔬 Multi-Document Research Assistant — v3
-
-Upload 5–6 research articles (PDF / Word / CSV / TXT) **or paste article URLs** and
-ask questions across all of them: comparisons, shared methodology, conflicting
-findings, tools used…
-
-What's new in v3 (everything from v2 is kept unchanged):
-  • 🔗 Add an article by URL. The app fetches the page, extracts the title and the
-    main text, and indexes it exactly like an uploaded file — so every question,
-    citation and comparison works on URL articles too. PDF links are downloaded and
-    parsed as PDFs; normal web pages are parsed as HTML (article body only).
-
+…
 Stack:
   • Streamlit   — UI
   • LangChain   — loaders, splitting, embeddings, retrieval (RAG)
@@ -29,8 +19,6 @@ Stack:
       * Groq model IDs change over time; edit MODEL_QUEUE below to match
         the live list at https://console.groq.com/docs/models
 
-Secrets live in .streamlit/secrets.toml (see the template that ships with this
-file) so you can deploy straight to Streamlit Community Cloud later.
 """
 
 import io
@@ -44,7 +32,7 @@ from datetime import datetime
 from typing import TypedDict
 from urllib.parse import urlparse
 
-# ── Server-side logging ───────────────────────────────────────────────────────
+# ------- Server-side logging ---------
 # Users never see raw errors (we show friendly messages instead), but every
 # failure is logged here so it shows up in the terminal / Streamlit Cloud logs
 # ("Manage app" → logs) where you can diagnose it.
@@ -84,14 +72,14 @@ except ImportError:
     _OLLAMA_AVAILABLE = False
 
 
-# ── Config ────────────────────────────────────────────────────────────────────
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"   # small = fast on CPU; bump to bge-large for quality
+# ------- Config --------
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  
 CHUNK_SIZE      = 1000
 CHUNK_OVERLAP   = 150
-TOP_K           = 10   # more chunks = better for comparison questions
-MEMORY_WINDOW   = 3    # number of prior Q/A pairs fed back into the prompt (sliding window)
+TOP_K           = 10   
+MEMORY_WINDOW   = 3    
 
-# A browser-like User-Agent so most sites serve us the real article HTML.
+
 URL_FETCH_HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -104,8 +92,7 @@ URL_FETCH_TIMEOUT = 30   # seconds
 GROQ_API_KEY    = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
 OLLAMA_BASE_URL = st.secrets.get("OLLAMA_BASE_URL", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
 
-# The model fallback queue (tried top-to-bottom until one succeeds).
-# Edit freely — provider is "groq" or "ollama".
+
 MODEL_QUEUE = [
     {"provider": "groq",   "model": "llama-3.3-70b-versatile",                  "label": "Llama 3.3 70B (Groq)"},
     {"provider": "groq",   "model": "openai/gpt-oss-120b",                      "label": "GPT-OSS 120B (Groq)"},
@@ -116,10 +103,10 @@ MODEL_QUEUE = [
     {"provider": "ollama", "model": "llama3",                                   "label": "Llama 3 (Ollama, local)"},
 ]
 
-AUTO_LABEL = "Auto (smart fallback)"   # default: try the whole queue top-to-bottom
+AUTO_LABEL = "Auto (smart fallback)"   
 
 
-# ── Step 1: Load any file type ────────────────────────────────────────────────
+#  Step 1: Load any file type 
 def load_file(file_path: str, filename: str) -> list[Document]:
     ext = Path(filename).suffix.lower()
 
@@ -145,10 +132,7 @@ def load_file(file_path: str, filename: str) -> list[Document]:
     return docs
 
 
-# ── Step 2b: Extract each article's real title (for the numbered citation list)
-# Strategy, in order: (1) PDF metadata title, (2) the largest-font text block on
-# page 1 (research-paper titles are always the biggest text), (3) first sensible
-# text line, (4) the file name. Steps 1-3 are validated by _looks_like_title.
+#  Extract each article's real title (for the numbered citation list)
 _SKIP_PREFIXES = ("abstract", "http", "doi", "www", "journal", "proceedings",
                   "arxiv", "preprint", "vol ", "volume", "copyright", "©",
                   "submitted", "received", "accepted", "published", "issn")
@@ -211,12 +195,7 @@ def _pdf_title_from_reader(reader, fallback_filename: str) -> str:
         return Path(fallback_filename).stem
 
 
-# ── Step 2e: Fetch an article from a URL ──────────────────────────────────────
-# A URL article is wrapped in a tiny object that looks just like a Streamlit
-# UploadedFile (it has .name, .size, .getvalue()), plus a pre-extracted .title.
-# That way it flows through extract_titles_fast / process_documents / build_graph
-# with NO changes to the existing pipeline — a PDF link becomes a ".pdf" source,
-# a normal web page becomes a ".txt" source holding its article text.
+#  Fetch an article from a URL 
 class URLSource:
     """Mimics a Streamlit UploadedFile so URL articles reuse the whole pipeline."""
 
@@ -343,7 +322,7 @@ def fetch_url_article(url: str) -> URLSource:
     return URLSource(name, body.encode("utf-8"), title, url)
 
 
-# ── Step 2c: FAST title pass — reads ONLY the first page of each PDF ───────────
+#   FAST title pass reads ONLY the first page of each PDF 
 @st.cache_resource(show_spinner="🔖 Reading titles...")
 def extract_titles_fast(file_signatures: tuple, _uploaded_files: list) -> list:
     """
@@ -354,7 +333,7 @@ def extract_titles_fast(file_signatures: tuple, _uploaded_files: list) -> list:
     tmp_dir = tempfile.gettempdir()
     titles = []
     for uf in _uploaded_files:
-        # URL sources arrive with their title already extracted during fetch.
+
         pre_title = getattr(uf, "title", None)
         if pre_title:
             titles.append(pre_title)
@@ -380,7 +359,7 @@ def extract_titles_fast(file_signatures: tuple, _uploaded_files: list) -> list:
     return titles
 
 
-# ── Step 2d: Heavy pass — full-document index + text (runs after titles show) ─
+
 @st.cache_resource(show_spinner="📚 Indexing documents…")
 def process_documents(file_signatures: tuple, _uploaded_files: list):
     """Parse every page once → (vectorstore for RAG, {filename: full_text})."""
@@ -430,7 +409,7 @@ def count_references_in_text(text: str) -> int:
         return 0
 
     low = text.lower()
-    # Jump to the LAST "References"/"Bibliography" heading (the real list, not an in-text mention).
+
     starts = [low.rfind("\nreferences"), low.rfind("references\n"),
               low.rfind("\nbibliography"), low.rfind("bibliography\n"),
               low.rfind("\nreferences cited")]
@@ -446,17 +425,17 @@ def count_references_in_text(text: str) -> int:
         if ints:
             return max(ints)
 
-    # 2) Inline markers [1]…[n] anywhere in the section.
+    
     inline = [int(x) for x in re.findall(r'\[(\d{1,4})\]', section) if int(x) < 2000]
     if inline:
         return max(inline)
 
-    # 3) Unnumbered (APA-style): count entries that contain a (YEAR).
+ 
     year_entries = re.findall(r'\((?:19|20)\d{2}[a-z]?\)', section)
     return len(year_entries)
 
 
-# ── Step 3: Classify question type ───────────────────────────────────────────
+# Step 3: Classify question type 
 def classify_question(question: str) -> str:
     q = question.lower()
     comparison_words = {"difference", "compare", "versus", "vs", "contrast",
@@ -482,7 +461,7 @@ def classify_question(question: str) -> str:
     return "general"
 
 
-# ── Step 4: Prompts per question type ─────────────────────────────────────────
+#  Step 4: Prompts per question type 
 PROMPTS = {
     "comparison": """You are a research assistant. Compare and contrast based ONLY on the documents provided.
 Structure your answer as:
@@ -555,8 +534,7 @@ NOTE: There is only ONE document, so every answer comes from it.
 Do NOT mention, repeat, or cite the document's name/filename — just answer the question directly.
 """
 
-# Keeps answers looking clean and professional (like ChatGPT / Claude) instead of
-# emitting huge markdown headings.
+
 ANSWER_STYLE = """
 
 FORMATTING:
@@ -566,10 +544,8 @@ FORMATTING:
 """
 
 
-# ── Step 5: LLM factory + fallback queue ──────────────────────────────────────
-# temperature=0.0 + no penalty makes Llama/Mixtral prone to repetition loops, so
-# we use a small temperature plus frequency/presence (Groq) or repeat (Ollama)
-# penalties, which strongly suppress the "same sentence 30× times" failure.
+#  Step 5: LLM factory + fallback queue 
+
 @st.cache_resource(show_spinner=False)
 def get_llm(provider: str, model: str):
     """Build (and cache) one chat model. Returns None if it can't be created."""
@@ -677,7 +653,7 @@ def generate_with_fallback(messages, preferred_label: str = "", stream: bool = F
     )
 
 
-# ── Step 6: Retrieval helper ──────────────────────────────────────────────────
+#  Step 6: Retrieval helper
 def retrieve_and_format(vectorstore, question: str, name_to_num: dict, name_to_title: dict, k: int = TOP_K):
     """Retrieve chunks and label each source by its article number + title, e.g. SOURCE [1]: <title>.
 
@@ -688,12 +664,11 @@ def retrieve_and_format(vectorstore, question: str, name_to_num: dict, name_to_t
     """
     results = vectorstore.similarity_search_with_relevance_scores(question, k=k)
 
-    # Drop duplicate / near-identical chunks — repeated context is a common trigger
-    # for the model echoing the same text back many times.
+ 
     grouped: dict[str, list[str]] = {}
-    best_score: dict[str, float] = {}      # doc_name -> highest relevance among its chunks
-    pages: dict[str, set] = {}             # doc_name -> set of 0-based page indices
-    raw_chunks: list = []                  # (text, score, page) for the debug panel
+    best_score: dict[str, float] = {}      
+    pages: dict[str, set] = {}            
+    raw_chunks: list = []                  
     seen: set = set()
     for doc, score in results:
         fingerprint = " ".join(doc.page_content.split()).lower()[:300]
@@ -727,7 +702,7 @@ def retrieve_and_format(vectorstore, question: str, name_to_num: dict, name_to_t
     return formatted, sources, raw_chunks
 
 
-# ── Step 7: LangGraph pipeline ────────────────────────────────────────────────
+#  Step 7: LangGraph pipeline 
 class GraphState(TypedDict):
     question: str
     q_type: str
@@ -736,9 +711,9 @@ class GraphState(TypedDict):
     answer: str
     model_used: str
     model_pref: str
-    raw_chunks: list      # [(text, score, page)] retrieved — surfaced in the RAG debug panel
-    prompt_used: str      # the prompt template name (q_type) actually used
-    llm_messages: list    # formatted messages handed to the UI for streaming generation
+    raw_chunks: list      
+    prompt_used: str      
+    llm_messages: list    
 
 
 @st.cache_resource(show_spinner=False)
@@ -795,9 +770,7 @@ def build_graph(doc_names: tuple, doc_titles: tuple, _vectorstore, _doc_texts: d
                 "reference counter (exact)", "reference_count", []
             return state
 
-        # Assemble the prompt (with a sliding window of recent conversation prepended)
-        # but DON'T call the LLM here — we hand the messages back so the UI layer can
-        # stream the response token-by-token via st.write_stream.
+
         rules = CITATION_SINGLE if single_doc else CITATION_MULTI
         template = PROMPTS[state["q_type"]] + rules + ANSWER_STYLE
 
@@ -833,7 +806,7 @@ def build_graph(doc_names: tuple, doc_titles: tuple, _vectorstore, _doc_texts: d
     return graph.compile()
 
 
-# ── Step 8: Conversation export (JSON + PDF) ──────────────────────────────────
+#  Step 8: Conversation export (JSON + PDF) 
 def conversation_to_json(title: str, articles: list[str], messages: list[dict]) -> bytes:
     payload = {
         "title": title,
@@ -892,7 +865,7 @@ def conversation_to_pdf(title: str, articles: list[str], messages: list[dict]) -
     return buf.getvalue()
 
 
-# ── Suggested actions (the chips that appear after upload) ────────────────────
+# Suggested actions (the chips that appear after upload) 
 # Each chip is (button label, the full question sent to the pipeline).
 SUGGESTIONS_SINGLE = [
     ("📝 Summary",          "Give me a detailed summary of this document."),
@@ -953,9 +926,7 @@ def run_query(app, question: str, model_pref: str = ""):
             "debug": debug,
         })
     except Exception:
-        # Never surface a raw error/traceback to the user — show a calm, friendly
-        # message and let them simply try again. The full traceback is logged
-        # server-side for debugging.
+
         log.exception("Query failed for question: %r", question)
         st.session_state.messages.append({
             "role": "assistant",
@@ -965,7 +936,7 @@ def run_query(app, question: str, model_pref: str = ""):
         })
 
 
-# ── Streamlit UI ──────────────────────────────────────────────────────────────
+#  Streamlit UI 
 st.set_page_config(page_title="Research Assistant", page_icon="🔬", layout="wide")
 
 # Professional, light-brown theme.
@@ -1209,7 +1180,7 @@ if "messages" not in st.session_state:
 if "url_sources" not in st.session_state:
     st.session_state.url_sources = []   # list[URLSource] added via the URL box
 
-# ── LEFT: sidebar = document upload + URL articles ────────────────────────────
+#  LEFT: sidebar = document upload + URL articles
 with st.sidebar:
     st.header("📁 Documents")
     uploaded_files = st.file_uploader(
@@ -1219,7 +1190,7 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    # ── Add an article by URL ────────────────────────────────────────────────
+    #  Add an article by URL 
     st.markdown("**🔗 Add an article by URL**")
     with st.form("url_form", clear_on_submit=True, border=False):
         url_in = st.text_input(
@@ -1264,10 +1235,7 @@ with st.sidebar:
             st.session_state.messages = []
             st.rerun()
 
-    # ── RAG internals (moved here from under each chat answer) ────────────────
-    # Pair each user question with the assistant turn that answered it, then list
-    # every enquiry — Enquiry 1, Enquiry 2, … — with its sources and retrieved
-    # chunks. Click the expander to inspect them all in one place.
+
     qa_pairs = []   # (question, assistant_msg)
     pending_q = None
     for m in st.session_state.messages:
@@ -1310,9 +1278,7 @@ with st.sidebar:
                 if idx < len(rag_pairs):
                     st.divider()
 
-# ── RIGHT (main): title, articles, suggestions, chat ──────────────────────────
-# Uploaded files and URL articles are merged into ONE list of sources; everything
-# downstream treats them identically.
+
 all_sources = (list(uploaded_files) if uploaded_files else []) + list(st.session_state.url_sources)
 article_names = [f.name for f in all_sources]
 st.title("🔬 Research Assistant")
@@ -1323,11 +1289,11 @@ if not all_sources:
 
 signatures = tuple((f.name, f.size) for f in all_sources)
 
-# 1) FAST: read just the first page of each PDF for the title (URL articles already
-#    carry their title), and show the cards immediately — before the slow indexing.
+# 1)  read just the first page of each PDF for the title (URL articles already
+
 extracted_titles = extract_titles_fast(signatures, all_sources)
 
-# Let the user correct any title the extractor got wrong (kept in the sidebar).
+
 with st.sidebar.expander("✏️ Edit article titles", expanded=False):
     article_titles = []
     for i, name in enumerate(article_names):
@@ -1338,7 +1304,7 @@ numbered_articles = [f"[{i+1}] {t}  —  {name}"
                      for i, (t, name) in enumerate(zip(article_titles, article_names))]
 is_single = len(article_names) == 1
 
-# Title strip listing every uploaded article (numbered, with extracted title).
+# Title strip listing every uploaded article 
 st.markdown("**🗂️ Articles in this session:**"
             + ("" if is_single else "  _(answers cite them as [1], [2], …)_"))
 acols = st.columns(min(len(article_names), 3))
@@ -1351,7 +1317,6 @@ for i, (title, name) in enumerate(zip(article_titles, article_names)):
 
 st.divider()
 
-# 2) HEAVY: full-document index + text (runs after the titles are already on screen).
 vectorstore, doc_texts = process_documents(signatures, all_sources)
 if not vectorstore:
     # Friendly, non-alarming guidance instead of a red error box.
@@ -1361,37 +1326,27 @@ if not vectorstore:
     st.stop()
 app = build_graph(tuple(article_names), tuple(article_titles), vectorstore, doc_texts)
 
-# Holds a chip-click question across the rerun.
+
 pending = None
 
-# ── Chat history ──────────────────────────────────────────────────────────────
+# Chat history 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg.get("model_used"):
             st.caption(f"answered by {msg['model_used']}")
-        # NOTE: Sources & RAG internals are no longer shown inline under each answer.
-        # They now live in the left sidebar ("🔬 RAG internals"), grouped per enquiry.
+      
 
 if "selected_model" not in st.session_state:
     st.session_state.selected_model = AUTO_LABEL
 MODEL_OPTIONS = [AUTO_LABEL] + [m["label"] for m in MODEL_QUEUE]
 session_title = "Research Assistant — " + ", ".join(article_names[:3]) + (" …" if len(article_names) > 3 else "")
 
-# Everything below the chat history (suggestions, input bar, downloads) is drawn by
-# render_controls(). It lives in a single placeholder so that, the moment a question
-# starts running, we can REDRAW the very same area in a disabled+dimmed state. The
-# controls stay on screen (no "two input bars" flash, nothing disappears) but become
-# clearly inaccessible while the answer is generated.
-#   • disabled=False → normal, interactive (the live state)
-#   • disabled=True  → greyed-out, non-clickable (the loading state)
-# The disabled pass uses a "_loading" key suffix so its widgets never collide with
-# the interactive ones rendered earlier in the same run.
 def render_controls(disabled: bool):
     sfx = "_loading" if disabled else ""
     picked = None
 
-    # ── Suggested actions — just above the input so they follow the latest answer ──
+    #  Suggested actions 
     st.markdown("**✨ Suggested actions** — "
                 + ("ask anything about your paper:" if is_single
                    else "explore across all your papers:"))
@@ -1402,13 +1357,13 @@ def render_controls(disabled: bool):
                                    use_container_width=True, disabled=disabled):
             picked = prompt_text
 
-    # ── Input bar: [ ➕ model ] [ text…………… ] [ ➤ ]  ──────────────────────────────
+    #  Input bar
     bar_plus, bar_box = st.columns([0.07, 0.93], gap="small")
     with bar_plus:
-        # The "+" sits at the left end of the input bar; click it to choose a model.
+       
         with st.popover("➕", use_container_width=True, disabled=disabled):
             st.markdown("**Answer with model**")
-            if disabled:   # throwaway key — purely visual while loading
+            if disabled:   
                 st.radio("model", MODEL_OPTIONS,
                          index=MODEL_OPTIONS.index(st.session_state.selected_model),
                          key="selected_model_loading", label_visibility="collapsed",
@@ -1429,7 +1384,7 @@ def render_controls(disabled: bool):
     if submitted and typed and typed.strip():
         picked = typed
 
-    # ── Download buttons — placed last, below the query box ───────────────────────
+    #  Download buttons 
     if st.session_state.messages:
         st.divider()
         st.markdown("**⬇️ Download the full conversation:**")
@@ -1441,8 +1396,8 @@ def render_controls(disabled: bool):
             mime="application/json", use_container_width=True,
             key=f"dl_json{sfx}", disabled=disabled,
         )
-        # PDF export is best-effort; if reportlab is missing we simply omit the
-        # button rather than showing an error to the user.
+  
+        
         try:
             pdf_bytes = conversation_to_pdf(session_title, numbered_articles, st.session_state.messages)
             d2.download_button(
@@ -1461,10 +1416,9 @@ controls = st.empty()
 with controls.container():
     pending = render_controls(disabled=False)
 
-# ── Run whichever question is pending (chip click or typed) ───────────────────
+#  Run whichever question is pending 
 if pending:
-    # Redraw the SAME area dimmed + disabled so it stays visible but inaccessible
-    # while the answer is generated (no disappearing, no duplicate input bar).
+    
     with controls.container():
         render_controls(disabled=True)
     with st.spinner("🔎 Searching across your documents..."):
