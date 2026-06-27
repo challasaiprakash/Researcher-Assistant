@@ -7,7 +7,7 @@ A Streamlit-powered RAG (Retrieval-Augmented Generation) application that lets y
 ---
 ## 🚀 Live Demo
 
-👉 **[Try AskSai here](https://personalchatbot-hjnhtqk8ej6a6jx7vbnaho.streamlit.app/)**
+👉 **[click here](https://researcher-assistant-khktgxxvqrfadilhvkfyqz.streamlit.app/)**
 
 ---
 ## ✨ Features
