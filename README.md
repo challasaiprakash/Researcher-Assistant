@@ -5,7 +5,11 @@ personal Researcher Assistant chatbot
 A Streamlit-powered RAG (Retrieval-Augmented Generation) application that lets you upload multiple research articles or paste URLs and ask questions across all of them at once. Built with LangChain, LangGraph, ChromaDB, and a 7-model Groq fallback queue.
 
 ---
+## 🚀 Live Demo
 
+👉 **[Try AskSai here](https://personalchatbot-hjnhtqk8ej6a6jx7vbnaho.streamlit.app/)**
+
+---
 ## ✨ Features
 
 - **Multi-source ingestion** — Upload PDF, Word (.docx), CSV, and TXT files, or paste article URLs directly (PDF links and web pages both supported)
