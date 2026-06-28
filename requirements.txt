@@ -20,8 +20,14 @@ langchain-chroma>=0.1
 chromadb>=0.5
 
 # Document loaders
-pypdf>=4.0                   # PDF
+pymupdf>=1.24               # PDF (PyMuPDFLoader + fitz)
 docx2txt>=0.8               # Word .doc/.docx
+beautifulsoup4>=4.12        # HTML (BSHTMLLoader)
+arxiv>=2.1                  # arXiv articles (ArxivLoader)
+
+# URL fetching
+requests>=2.31             # download web pages / PDF links
+trafilatura>=1.8           # best-effort article extraction (optional)
 
 # Conversation export
 reportlab>=4.0              # PDF download of the Q&A
