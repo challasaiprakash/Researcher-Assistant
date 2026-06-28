@@ -131,7 +131,7 @@ langchain-ollama
 
 </details>
 
-> **Note:** `pymupdf` (which exposes the `fitz` module) replaces the older `pypdf` package. It is used for all PDF operations: loading via `PyMuPDFLoader`, per-page text extraction, font-size-based title inference, and opening PDF bytes fetched from URLs. If you are upgrading from a previous version of this project, run `pip uninstall pypdf` and `pip install pymupdf`.
+> **Note:** `pymupdf` (which exposes the `fitz` module) handles all PDF operations: loading via `PyMuPDFLoader`, per-page text extraction, font-size-based title inference, and opening PDF bytes fetched from URLs. No `pypdf` or `pdfplumber` dependency is required.
 
 ### 4. Configure secrets
 
