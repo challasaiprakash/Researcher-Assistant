@@ -53,7 +53,7 @@ import streamlit as st
 import requests
 
 from langchain_community.document_loaders import (
-    PyPDFLoader, Docx2txtLoader, CSVLoader, TextLoader
+    PyMuPDFLoader, Docx2txtLoader, CSVLoader, TextLoader, BSHTMLLoader, ArxivLoader
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import FastEmbedEmbeddings  # ONNX, no torch — robust on Windows
@@ -73,11 +73,11 @@ except ImportError:
 
 
 # ------- Config --------
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 CHUNK_SIZE      = 1000
 CHUNK_OVERLAP   = 150
-TOP_K           = 10   
-MEMORY_WINDOW   = 3    
+TOP_K           = 10
+MEMORY_WINDOW   = 3
 
 
 URL_FETCH_HEADERS = {
@@ -103,17 +103,19 @@ MODEL_QUEUE = [
     {"provider": "ollama", "model": "llama3",                                   "label": "Llama 3 (Ollama, local)"},
 ]
 
-AUTO_LABEL = "Auto (smart fallback)"   
+AUTO_LABEL = "Auto (smart fallback)"
 
 
-#  Step 1: Load any file type 
+#  Step 1: Load any file type
 def load_file(file_path: str, filename: str) -> list[Document]:
     ext = Path(filename).suffix.lower()
 
     if ext == ".pdf":
-        loader = PyPDFLoader(file_path)
+        loader = PyMuPDFLoader(file_path)
     elif ext in [".doc", ".docx"]:
         loader = Docx2txtLoader(file_path)
+    elif ext in [".html", ".htm"]:
+        loader = BSHTMLLoader(file_path)
     elif ext == ".csv":
         loader = CSVLoader(file_path)
     elif ext == ".txt":
@@ -156,11 +158,11 @@ def _guess_title_from_text(text: str, fallback_filename: str) -> str:
     return Path(fallback_filename).stem
 
 
-def _pdf_title_from_reader(reader, fallback_filename: str) -> str:
-    """Title from an ALREADY-OPEN pypdf reader (so we don't re-parse the file)."""
+def _pdf_title_from_doc(doc, fallback_filename: str) -> str:
+    """Title from an ALREADY-OPEN PyMuPDF document (so we don't re-parse the file)."""
     # 1) Metadata title — only if it looks real.
     try:
-        meta_title = (reader.metadata.title or "").strip() if reader.metadata else ""
+        meta_title = ((doc.metadata or {}).get("title") or "").strip()
         if _looks_like_title(meta_title):
             return meta_title[:200]
     except Exception:
@@ -168,34 +170,32 @@ def _pdf_title_from_reader(reader, fallback_filename: str) -> str:
 
     # 2) Largest-font text near the top of page 1.
     try:
-        page = reader.pages[0]
+        page = doc[0]
         spans = []  # (font_size, y_position, text)
+        for block in page.get_text("dict").get("blocks", []):
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    text = span.get("text", "")
+                    if text and text.strip():
+                        size = round(float(span.get("size", 0.0)), 1)
+                        y = span.get("bbox", (0, 0, 0, 0))[1]
+                        spans.append((size, y, text))
 
-        def visitor(text, cm, tm, fontdict, fontsize):
-            if text and text.strip():
-                try:
-                    size = float(fontsize)
-                except Exception:
-                    size = 0.0
-                y = tm[5] if tm else 0
-                spans.append((round(size, 1), y, text))
-
-        page.extract_text(visitor_text=visitor)
         if spans:
             max_size = max(s[0] for s in spans)
             top = [s for s in spans if s[0] >= max_size - 0.5]   # the biggest-font run(s)
-            top.sort(key=lambda s: -s[1])                        # top of page first
+            top.sort(key=lambda s: s[1])                         # top of page first
             title = " ".join(" ".join(t.strip() for _, _, t in top).split())
             if _looks_like_title(title):
                 return title[:200]
 
         # 3) Fall back to the first sensible plain-text line.
-        return _guess_title_from_text(page.extract_text() or "", fallback_filename)
+        return _guess_title_from_text(page.get_text() or "", fallback_filename)
     except Exception:
         return Path(fallback_filename).stem
 
 
-#  Fetch an article from a URL 
+#  Fetch an article from a URL
 class URLSource:
     """Mimics a Streamlit UploadedFile so URL articles reuse the whole pipeline."""
 
@@ -228,12 +228,18 @@ def _unique_name(name: str, taken: set) -> str:
     return f"{stem}_{i}{ext}"
 
 
+def _arxiv_id_from_url(url: str) -> str:
+    import re
+    m = re.search(r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5}(?:v\d+)?)", url, re.I)
+    return m.group(1) if m else ""
+
+
 def _title_from_pdf_bytes(data: bytes, url: str) -> str:
     """Reuse the PDF title cascade on bytes downloaded from a URL."""
     try:
-        import pypdf
-        reader = pypdf.PdfReader(io.BytesIO(data))
-        return _pdf_title_from_reader(reader, Path(urlparse(url).path).name or "article.pdf")
+        import fitz
+        doc = fitz.open(stream=data, filetype="pdf")
+        return _pdf_title_from_doc(doc, Path(urlparse(url).path).name or "article.pdf")
     except Exception:
         return Path(urlparse(url).path).stem or "Article"
 
@@ -302,6 +308,17 @@ def fetch_url_article(url: str) -> URLSource:
     """Download a URL and wrap it as a URLSource (PDF link → .pdf, web page → .txt)."""
     if not urlparse(url).scheme:
         url = "https://" + url
+
+    arxiv_id = _arxiv_id_from_url(url)
+    if arxiv_id:
+        docs = ArxivLoader(query=arxiv_id, load_max_docs=1).load()
+        if docs:
+            meta = docs[0].metadata
+            title = (meta.get("Title") or "").strip() or f"arXiv {arxiv_id}"
+            body = (title + "\n\n" + docs[0].page_content).strip()
+            name = _sanitize_filename(title, ".txt")
+            return URLSource(name, body.encode("utf-8"), title, url)
+
     resp = requests.get(url, headers=URL_FETCH_HEADERS, timeout=URL_FETCH_TIMEOUT)
     resp.raise_for_status()
 
@@ -322,7 +339,7 @@ def fetch_url_article(url: str) -> URLSource:
     return URLSource(name, body.encode("utf-8"), title, url)
 
 
-#   FAST title pass reads ONLY the first page of each PDF 
+#   FAST title pass reads ONLY the first page of each PDF
 @st.cache_resource(show_spinner="🔖 Reading titles...")
 def extract_titles_fast(file_signatures: tuple, _uploaded_files: list) -> list:
     """
@@ -346,9 +363,9 @@ def extract_titles_fast(file_signatures: tuple, _uploaded_files: list) -> list:
             f.write(uf.getvalue())
         try:
             if ext == ".pdf":
-                import pypdf
-                reader = pypdf.PdfReader(path)            # lazy — only page 0 is read below
-                titles.append(_pdf_title_from_reader(reader, name))
+                import fitz
+                doc = fitz.open(path)
+                titles.append(_pdf_title_from_doc(doc, name))
             elif ext in (".doc", ".docx"):
                 import docx2txt
                 titles.append(_guess_title_from_text(docx2txt.process(path) or "", name))
@@ -364,7 +381,7 @@ def extract_titles_fast(file_signatures: tuple, _uploaded_files: list) -> list:
 def process_documents(file_signatures: tuple, _uploaded_files: list):
     """Parse every page once → (vectorstore for RAG, {filename: full_text})."""
     tmp_dir = tempfile.gettempdir()
-    all_docs, texts = [], {}
+    all_docs, texts, errors = [], {}, []
 
     for uf in _uploaded_files:
         name = uf.name
@@ -374,8 +391,8 @@ def process_documents(file_signatures: tuple, _uploaded_files: list):
             f.write(uf.getvalue())
         try:
             if ext == ".pdf":
-                import pypdf
-                pages = [(p.extract_text() or "") for p in pypdf.PdfReader(path).pages]
+                import fitz
+                pages = [(page.get_text() or "") for page in fitz.open(path)]
                 docs = [Document(page_content=pg,
                                  metadata={"doc_name": name, "doc_id": name, "page": i})
                         for i, pg in enumerate(pages)]
@@ -383,14 +400,15 @@ def process_documents(file_signatures: tuple, _uploaded_files: list):
             else:  # docx / csv / txt
                 docs = load_file(path, name)
                 full = "\n".join(d.page_content for d in docs)
-        except Exception:
+        except Exception as e:
             log.exception("Failed to parse document: %s", name)
+            errors.append(f"{name} — {type(e).__name__}: {e}")
             docs, full = [], ""
         all_docs.extend(docs)
         texts[name] = full
 
     if not all_docs:
-        return None, texts
+        return None, texts, errors
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP,
@@ -399,7 +417,7 @@ def process_documents(file_signatures: tuple, _uploaded_files: list):
     splits = splitter.split_documents(all_docs)
     embeddings = FastEmbedEmbeddings(model_name=EMBEDDING_MODEL)   # ONNX, no torch
     vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings)
-    return vectorstore, texts
+    return vectorstore, texts, errors
 
 
 def count_references_in_text(text: str) -> int:
@@ -425,17 +443,17 @@ def count_references_in_text(text: str) -> int:
         if ints:
             return max(ints)
 
-    
+
     inline = [int(x) for x in re.findall(r'\[(\d{1,4})\]', section) if int(x) < 2000]
     if inline:
         return max(inline)
 
- 
+
     year_entries = re.findall(r'\((?:19|20)\d{2}[a-z]?\)', section)
     return len(year_entries)
 
 
-# Step 3: Classify question type 
+# Step 3: Classify question type
 def classify_question(question: str) -> str:
     q = question.lower()
     comparison_words = {"difference", "compare", "versus", "vs", "contrast",
@@ -461,7 +479,7 @@ def classify_question(question: str) -> str:
     return "general"
 
 
-#  Step 4: Prompts per question type 
+#  Step 4: Prompts per question type
 PROMPTS = {
     "comparison": """You are a research assistant. Compare and contrast based ONLY on the documents provided.
 Structure your answer as:
@@ -544,7 +562,7 @@ FORMATTING:
 """
 
 
-#  Step 5: LLM factory + fallback queue 
+#  Step 5: LLM factory + fallback queue
 
 @st.cache_resource(show_spinner=False)
 def get_llm(provider: str, model: str):
@@ -664,11 +682,11 @@ def retrieve_and_format(vectorstore, question: str, name_to_num: dict, name_to_t
     """
     results = vectorstore.similarity_search_with_relevance_scores(question, k=k)
 
- 
+
     grouped: dict[str, list[str]] = {}
-    best_score: dict[str, float] = {}      
-    pages: dict[str, set] = {}            
-    raw_chunks: list = []                  
+    best_score: dict[str, float] = {}
+    pages: dict[str, set] = {}
+    raw_chunks: list = []
     seen: set = set()
     for doc, score in results:
         fingerprint = " ".join(doc.page_content.split()).lower()[:300]
@@ -702,7 +720,7 @@ def retrieve_and_format(vectorstore, question: str, name_to_num: dict, name_to_t
     return formatted, sources, raw_chunks
 
 
-#  Step 7: LangGraph pipeline 
+#  Step 7: LangGraph pipeline
 class GraphState(TypedDict):
     question: str
     q_type: str
@@ -711,9 +729,9 @@ class GraphState(TypedDict):
     answer: str
     model_used: str
     model_pref: str
-    raw_chunks: list      
-    prompt_used: str      
-    llm_messages: list    
+    raw_chunks: list
+    prompt_used: str
+    llm_messages: list
 
 
 @st.cache_resource(show_spinner=False)
@@ -806,7 +824,7 @@ def build_graph(doc_names: tuple, doc_titles: tuple, _vectorstore, _doc_texts: d
     return graph.compile()
 
 
-#  Step 8: Conversation export (JSON + PDF) 
+#  Step 8: Conversation export (JSON + PDF)
 def conversation_to_json(title: str, articles: list[str], messages: list[dict]) -> bytes:
     payload = {
         "title": title,
@@ -865,7 +883,7 @@ def conversation_to_pdf(title: str, articles: list[str], messages: list[dict]) -
     return buf.getvalue()
 
 
-# Suggested actions (the chips that appear after upload) 
+# Suggested actions (the chips that appear after upload)
 # Each chip is (button label, the full question sent to the pipeline).
 SUGGESTIONS_SINGLE = [
     ("📝 Summary",          "Give me a detailed summary of this document."),
@@ -936,7 +954,7 @@ def run_query(app, question: str, model_pref: str = ""):
         })
 
 
-#  Streamlit UI 
+#  Streamlit UI
 st.set_page_config(page_title="Research Assistant", page_icon="🔬", layout="wide")
 
 # Professional, light-brown theme.
@@ -1185,12 +1203,12 @@ with st.sidebar:
     st.header("📁 Documents")
     uploaded_files = st.file_uploader(
         "Upload documents",
-        type=["pdf", "doc", "docx", "csv", "txt"],
+        type=["pdf", "doc", "docx", "html", "htm", "csv", "txt"],
         accept_multiple_files=True,
         label_visibility="collapsed",
     )
 
-    #  Add an article by URL 
+    #  Add an article by URL
     st.markdown("**🔗 Add an article by URL**")
     with st.form("url_form", clear_on_submit=True, border=False):
         url_in = st.text_input(
@@ -1304,7 +1322,7 @@ numbered_articles = [f"[{i+1}] {t}  —  {name}"
                      for i, (t, name) in enumerate(zip(article_titles, article_names))]
 is_single = len(article_names) == 1
 
-# Title strip listing every uploaded article 
+# Title strip listing every uploaded article
 st.markdown("**🗂️ Articles in this session:**"
             + ("" if is_single else "  _(answers cite them as [1], [2], …)_"))
 acols = st.columns(min(len(article_names), 3))
@@ -1317,25 +1335,29 @@ for i, (title, name) in enumerate(zip(article_titles, article_names)):
 
 st.divider()
 
-vectorstore, doc_texts = process_documents(signatures, all_sources)
+vectorstore, doc_texts, parse_errors = process_documents(signatures, all_sources)
 if not vectorstore:
     # Friendly, non-alarming guidance instead of a red error box.
     log.warning("No documents indexed for sources: %s", article_names)
     st.info("I couldn't read text from those sources yet. "
             "Try re-uploading the files or adding a different URL.")
+    if parse_errors:
+        with st.expander("Why did this fail?"):
+            for e in parse_errors:
+                st.code(e)
     st.stop()
 app = build_graph(tuple(article_names), tuple(article_titles), vectorstore, doc_texts)
 
 
 pending = None
 
-# Chat history 
+# Chat history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg.get("model_used"):
             st.caption(f"answered by {msg['model_used']}")
-      
+
 
 if "selected_model" not in st.session_state:
     st.session_state.selected_model = AUTO_LABEL
@@ -1346,7 +1368,7 @@ def render_controls(disabled: bool):
     sfx = "_loading" if disabled else ""
     picked = None
 
-    #  Suggested actions 
+    #  Suggested actions
     st.markdown("**✨ Suggested actions** — "
                 + ("ask anything about your paper:" if is_single
                    else "explore across all your papers:"))
@@ -1360,10 +1382,10 @@ def render_controls(disabled: bool):
     #  Input bar
     bar_plus, bar_box = st.columns([0.07, 0.93], gap="small")
     with bar_plus:
-       
+
         with st.popover("➕", use_container_width=True, disabled=disabled):
             st.markdown("**Answer with model**")
-            if disabled:   
+            if disabled:
                 st.radio("model", MODEL_OPTIONS,
                          index=MODEL_OPTIONS.index(st.session_state.selected_model),
                          key="selected_model_loading", label_visibility="collapsed",
@@ -1384,7 +1406,7 @@ def render_controls(disabled: bool):
     if submitted and typed and typed.strip():
         picked = typed
 
-    #  Download buttons 
+    #  Download buttons
     if st.session_state.messages:
         st.divider()
         st.markdown("**⬇️ Download the full conversation:**")
@@ -1396,8 +1418,8 @@ def render_controls(disabled: bool):
             mime="application/json", use_container_width=True,
             key=f"dl_json{sfx}", disabled=disabled,
         )
-  
-        
+
+
         try:
             pdf_bytes = conversation_to_pdf(session_title, numbered_articles, st.session_state.messages)
             d2.download_button(
@@ -1416,9 +1438,9 @@ controls = st.empty()
 with controls.container():
     pending = render_controls(disabled=False)
 
-#  Run whichever question is pending 
+#  Run whichever question is pending
 if pending:
-    
+
     with controls.container():
         render_controls(disabled=True)
     with st.spinner("🔎 Searching across your documents..."):
