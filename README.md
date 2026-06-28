@@ -1,4 +1,3 @@
-
 # 🔬 Multi-Document Research Assistant 
 personal Researcher Assistant chatbot
 
@@ -9,6 +8,7 @@ personal Researcher Assistant chatbot
 ![ChromaDB](https://img.shields.io/badge/VectorStore-ChromaDB-purple?style=flat-square)
 ![FastEmbed](https://img.shields.io/badge/Embeddings-FastEmbed_ONNX-orange?style=flat-square)
 ![HuggingFace](https://img.shields.io/badge/HuggingFace-bge--small--en--v1.5-yellow?style=flat-square)
+![PyMuPDF](https://img.shields.io/badge/PDF-PyMuPDF_(fitz)-blue?style=flat-square)
 ![Groq](https://img.shields.io/badge/LLM-Groq_API-F55036?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)
 
@@ -27,7 +27,7 @@ A Streamlit-powered RAG (Retrieval-Augmented Generation) application that lets y
 - **Smart numbered citations** — Answers cite sources as `[1]`, `[2]`, etc., automatically mapped to extracted article titles
 - **7-model fallback queue** — Automatically tries Groq models top-to-bottom until one succeeds; or manually pick a model via the ➕ button
 - **Local Ollama fallback** — Falls through to a local `llama3` model if all Groq calls fail (requires Ollama installed)
-- **PDF title extraction** — Reads font-size metadata from page 1 to extract the real paper title (not just the filename)
+- **PDF title extraction via PyMuPDF** — Uses `fitz` to read font-size metadata (span-level dict) from page 1, picking the largest-font text block as the real paper title; falls back to PDF metadata field, then to the first sensible plain-text line — all without re-parsing the file a second time
 - **URL article ingestion** — Fetches web pages and PDF links, extracts article body via trafilatura / BeautifulSoup / regex cascade, and indexes them identically to uploaded files
 - **Sliding memory window** — Last 3 Q&A pairs are fed back into every prompt for coherent multi-turn conversations
 - **Conversation export** — Download the full session as JSON or PDF (via ReportLab)
@@ -54,6 +54,7 @@ LangGraph pipeline
 Formatted answer + [N] citations
 ```
 
+**PDF loader:** `PyMuPDFLoader` (LangChain community) + `fitz` (PyMuPDF) for direct page-level text extraction and title inference  
 **Embedding model:** `BAAI/bge-small-en-v1.5` via FastEmbed (ONNX, no PyTorch — robust on Windows)  
 **Vector store:** ChromaDB (in-memory per session)  
 **Chunk size:** 1 000 tokens | **Overlap:** 150 | **Top-k:** 10
@@ -115,7 +116,7 @@ langchain-core
 langgraph
 chromadb
 fastembed
-pypdf
+pymupdf                  # replaces pypdf — provides PyMuPDFLoader and fitz
 docx2txt
 requests
 reportlab
@@ -129,6 +130,8 @@ langchain-ollama
 ```
 
 </details>
+
+> **Note:** `pymupdf` (which exposes the `fitz` module) replaces the older `pypdf` package. It is used for all PDF operations: loading via `PyMuPDFLoader`, per-page text extraction, font-size-based title inference, and opening PDF bytes fetched from URLs. If you are upgrading from a previous version of this project, run `pip uninstall pypdf` and `pip install pymupdf`.
 
 ### 4. Configure secrets
 
@@ -157,12 +160,32 @@ The app opens at `http://localhost:8501`.
 
 | Format | Loader |
 |---|---|
-| `.pdf` | PyPDFLoader + pypdf (title extraction) |
+| `.pdf` | `PyMuPDFLoader` (LangChain) + `fitz` (PyMuPDF) for title extraction and per-page text |
 | `.docx` / `.doc` | Docx2txtLoader |
 | `.csv` | CSVLoader |
 | `.txt` | TextLoader (UTF-8) |
 | URL (web page) | requests + trafilatura / BeautifulSoup |
-| URL (PDF link) | requests + PyPDF |
+| URL (PDF link) | requests + `fitz.open(stream=…)` (PyMuPDF) |
+
+---
+
+## 🧠 PDF Processing with PyMuPDF
+
+PyMuPDF (`fitz`) drives all PDF handling in this project — there is no dependency on `pypdf` or `pdfplumber`.
+
+| Operation | How it works |
+|---|---|
+| **Document loading** | `PyMuPDFLoader(file_path)` from `langchain_community` — returns one `Document` per page with page number in metadata |
+| **Per-page full text** | `fitz.open(path)` → `page.get_text()` — used to build the full-text store for reference counting |
+| **Title inference** | `page.get_text("dict")` → span-level blocks with `size`, `bbox`, and `text`; the largest-font spans near the top of page 1 are joined as the title |
+| **PDF metadata title** | `doc.metadata.get("title")` checked first; used if it looks like a real title |
+| **URL PDF bytes** | `fitz.open(stream=data, filetype="pdf")` — same title cascade on in-memory bytes |
+
+**Title extraction cascade (in order):**
+1. PDF metadata `title` field — used if it contains ≥ 3 words and no generic filler
+2. Largest-font text block(s) on page 1 via `get_text("dict")` span analysis
+3. First sensible plain-text line from `page.get_text()`
+4. Filename stem as final fallback
 
 ---
 
@@ -174,7 +197,7 @@ The app opens at `http://localhost:8501`.
 | `conclusion` | "conclusion", "finding", "result", "summarize" | Per-paper → common themes → conflicts → takeaway |
 | `relationship` | "related", "connection", "overlap", "share" | Topic / Methodology / Citability / Verdict |
 | `methodology` | "method", "tool", "dataset", "algorithm" | Markdown table + common / unique / strengths |
-| `reference_count` | "how many references", "number of citations" | Deterministic count from reference section |
+| `reference_count` | "how many references", "number of citations" | Deterministic count from reference section (no LLM) |
 | `general` | everything else | Direct RAG answer |
 
 ---
@@ -234,4 +257,4 @@ MIT — free to use, modify, and distribute.
 
 ## 🙏 Acknowledgements
 
-Built on top of [LangChain](https://github.com/langchain-ai/langchain), [LangGraph](https://github.com/langchain-ai/langgraph), [ChromaDB](https://github.com/chroma-core/chroma), [FastEmbed](https://github.com/qdrant/fastembed), and [Groq](https://groq.com/).
+Built on top of [LangChain](https://github.com/langchain-ai/langchain), [LangGraph](https://github.com/langchain-ai/langgraph), [ChromaDB](https://github.com/chroma-core/chroma), [FastEmbed](https://github.com/qdrant/fastembed), [PyMuPDF](https://github.com/pymupdf/PyMuPDF), and [Groq](https://groq.com/).
