@@ -21,6 +21,20 @@ Stack:
 
 """
 
+# --- SQLite shim for Streamlit Community Cloud ------------------------------
+# ChromaDB needs sqlite3 >= 3.35, but Streamlit Cloud's Debian image ships an
+# older system sqlite3, which crashes the app on Chroma.from_documents(...).
+# Swapping in the modern pysqlite3-binary wheel BEFORE any chromadb import
+# fixes it. Harmless on Windows/local (pysqlite3 isn't installed there, so we
+# just fall through to the built-in sqlite3).
+try:
+    __import__("pysqlite3")
+    import sys as _sys
+    _sys.modules["sqlite3"] = _sys.modules.pop("pysqlite3")
+except ImportError:
+    pass
+# ---------------------------------------------------------------------------
+
 import io
 import os
 import html
