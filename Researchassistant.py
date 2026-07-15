@@ -80,7 +80,7 @@ except ImportError:
 
 # ------- Config --------
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
-CHUNK_SIZE      = 1000
+CHUNK_SIZE      = 2000
 CHUNK_OVERLAP   = 150
 TOP_K           = 10
 MEMORY_WINDOW   = 3
