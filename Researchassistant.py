@@ -22,11 +22,7 @@ Stack:
 """
 
 # --- SQLite shim for Streamlit Community Cloud ------------------------------
-# ChromaDB needs sqlite3 >= 3.35, but Streamlit Cloud's Debian image ships an
-# older system sqlite3, which crashes the app on Chroma.from_documents(...).
-# Swapping in the modern pysqlite3-binary wheel BEFORE any chromadb import
-# fixes it. Harmless on Windows/local (pysqlite3 isn't installed there, so we
-# just fall through to the built-in sqlite3).
+
 try:
     __import__("pysqlite3")
     import sys as _sys
@@ -47,18 +43,14 @@ from typing import TypedDict
 from urllib.parse import urlparse
 
 # ------- Server-side logging ---------
-# Users never see raw errors (we show friendly messages instead), but every
-# failure is logged here so it shows up in the terminal / Streamlit Cloud logs
-# ("Manage app" → logs) where you can diagnose it.
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
 )
 log = logging.getLogger("research_assistant")
 
-# Environment must be set before the embedding backend (onnxruntime) loads.
-# KMP_DUPLICATE_LIB_OK avoids the "libiomp5md.dll already initialized" crash that
-# conda + native wheels trigger on Windows.
+
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
